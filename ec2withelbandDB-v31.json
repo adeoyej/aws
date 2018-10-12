@@ -1,0 +1,384 @@
+{
+	"AWSTemplateFormatVersion": "2010-09-09",
+	"Description": "Creates an Elastic Load Balancer, EC2 instance created from specified AMI or Marketplace, then connected to ELB and RDS created from psecified snapshot",
+	"Parameters": {
+		"VPC": {
+			"Description": "Lists existing Vpc to choose from",
+			"Type": "AWS::EC2::VPC::Id"
+		},
+		"AvailabilityZone": {
+           "Description": "select the Availability Zone to launch the Instances (for EC2 and RDS)",
+           "Type": "AWS::EC2::AvailabilityZone::Name"
+        },
+		"KeyPairName": {
+			"Description": "Name of an existing EC2 KeyPair to enable SSH access to the instance",
+			"Type": "AWS::EC2::KeyPair::KeyName",
+			"ConstraintDescription": "must be the name of an existing EC2 KeyPair."
+		},
+		"WebServerSG": {
+			"Type": "List<AWS::EC2::SecurityGroup::Id>",
+			"Description": "Creates a multiselect box for existing security groups"
+		},
+		"RDSSG": {
+			"Type": "AWS::EC2::SecurityGroup::Id",
+			"Description": "Creates a multiselect box for existing security groups"
+		},		
+		"ELBSG": {
+			"Type": "AWS::EC2::SecurityGroup::Id",
+			"Description": "Creates a multiselect box for existing security groups"
+		},		
+		"cpaEC2AMI": {
+			"Description": "Enter the CPA AMI ID to use for creating the EC2 instance - Leave blank to use default Marketpalce AMI for this region",
+			"AllowedPattern": "(ami-[0-9a-f]{8}){0,1}",
+			"Default": "",
+			"Type": "String"
+		},
+		"ELBZone": {
+            "AllowedValues": [
+                "true",
+                "false"
+            ],
+            "Default": "false",
+            "Description": "Select option to Enable or Disable ELB Cross-Zone Load Balancing for Classic ELB",
+            "Type": "String"
+        },
+		"ClientName" : {
+            "Type" : "String",
+            "MinLength": "1",
+            "MaxLength": "15",      
+            "Description" : "Type Client name here. For example - cpa"
+        },
+		"RegionLabel" : {
+            "Type" : "String",
+	        "AllowedValues" : [ "use", "usw", "apn", "aps", "euc", "euw", "ugw1", "ugw2", "apse"],
+            "Description" : " For Tagging purpose - Select region where resource is to be configured. e.g: ugw1 => us-gov-west-1"
+        },
+		"ServerEnv" : {
+            "Type" : "String",
+            "AllowedValues" : [ "prod", "test", "dmz", "demo", "dev", "cpa", "mmt", "sales"], 
+            "Description" : "Default environment for the Client infrastructure you want to deploy."
+        },
+		"ServerRole" : {
+            "Type" : "String",
+	        "AllowedValues" : [ "web", "iis", "oracle", "mssql", "mysql", "database", "vpn", "jumpbox", "bastion"],	  
+            "Description" : "Select the role for the Client Infrastructure to build. For example - web or database"
+        },
+		"ServerEnvCount" : {
+            "Type" : "String",
+	        "AllowedValues" : [ "d01", "d02", "d03", "t01", "t02", "t03", "p01", "p02", "p03"],
+            "Description" : " For Tagging purpose - Select Client's current environment count. e.g. D=Dev, T=Test, P=Prod"
+        },
+		"DBEngine" : {
+            "Type" : "String",
+            "AllowedValues" : [ "oracle-ee", "oracle-se2", "oracle-se1", "mysql", "aurora", "sqlserver-ee", "sqlserver-se", "mariadb"], 
+			"Default": "oracle-se2",
+            "Description" : "Enter the name of the database engine to be used for this instance."
+        },
+		"DBLicenseModel" : {
+            "Type" : "String",
+            "AllowedValues" : [ "license-included", "bring-your-own-license", "general-public-license"], 
+			"Default": "bring-your-own-license",
+            "Description" : "Select the license model of the DB instance."
+        },		
+		"DBSnapshotName": {
+			"Type": "String",
+			"Description": "Enter the name or ARN of an existing DB snapshot that will be used to restore the DB instance"
+		},
+        "DBName": {
+           "Default": "ORCLDB",
+           "Description" : "Enter name of the DB instance. NOTE: This may be ignored if restoring from Snapshot. Because the value is inherited from the source DB instance or snapshot.",
+           "Type": "String",
+           "MinLength": "1",
+           "MaxLength": "64",
+           "AllowedPattern" : "[a-zA-Z][a-zA-Z0-9]*",
+           "ConstraintDescription" : "must begin with a letter and contain only alphanumeric characters."
+        },
+        "DBInstanceIdentifier": {
+           "Default": "cpademo",
+           "Description" : "Enter DB instance unique identifier. NOTE: First character must be a letter. Must contain from 1 to 63 letters, numbers, or hyphens. Cannot end with a hyphen or contain two consecutive hyphens",
+           "Type": "String",
+           "MinLength": "1",
+           "MaxLength": "63",
+           "AllowedPattern" : "[a-zA-Z][a-zA-Z0-9]*",
+           "ConstraintDescription" : "must begin with a letter and contain only alphanumeric characters."
+        },
+        "MultiAZDatabase": {
+           "Default": "false",
+           "Description" : "Creates a Multi-AZ Amazon RDS database instance",
+           "Type": "String",
+           "AllowedValues" : [ "true", "false" ],
+           "ConstraintDescription" : "must be either true or false."
+        },
+        "DBUser": {
+           "NoEcho": "false",
+		   "Default": "sa_master",
+           "Description" : "Specify the master user name for the DB instance. NOTE: This may be ignored if restoring from Snapshot. Because the value is inherited from the source DB instance or snapshot.",
+           "Type": "String",
+           "MinLength": "1",
+           "MaxLength": "16",
+           "AllowedPattern" : "[a-zA-Z][a-zA-Z0-9_]*",
+           "ConstraintDescription" : "must begin with a letter and contain only alphanumeric characters."
+        },
+        "DBPassword": {
+           "NoEcho": "true",
+           "Description" : "Specify the master password for the DB instance. NOTE: This may be ignored if restoring from Snapshot. Because the value is inherited from the source DB instance or snapshot.",
+           "Type": "String",
+           "MinLength": "8",
+           "MaxLength": "41",
+           "AllowedPattern" : "^[a-zA-Z0-9!@#$&()\\-`.+,/\"]*$",
+           "ConstraintDescription" : "must contain only alphanumeric characters."
+        },
+        "DBInstanceClass": {
+           "Description" : "Enter the name of the compute and memory capacity classes of the DB instance",
+           "Type": "String",
+           "Default": "db.m4.xlarge",
+           "AllowedValues" : [ "db.t1.micro", "db.m1.small", "db.m1.medium", "db.m1.large", "db.m1.xlarge", "db.m2.xlarge", "db.m2.2xlarge", "db.m2.4xlarge", "db.m3.medium", "db.m3.large", "db.m3.xlarge", "db.m3.2xlarge", "db.m4.large", "db.m4.xlarge", "db.m4.2xlarge", "db.m4.4xlarge", "db.m4.10xlarge", "db.r3.large", "db.r3.xlarge", "db.r3.2xlarge", "db.r3.4xlarge", "db.r3.8xlarge", "db.m2.xlarge", "db.m2.2xlarge", "db.m2.4xlarge", "db.cr1.8xlarge", "db.t2.micro", "db.t2.small", "db.t2.medium", "db.t2.large"]
+,
+           "ConstraintDescription" : "must select a valid database instance type."
+        },
+        "DBAllocatedStorage": {
+           "Default": "50",
+           "Description" : "Enter the allocated storage size, specified in gigabytes (GB).",
+           "Type": "Number",
+           "MinValue": "5",
+           "MaxValue": "2048",
+           "ConstraintDescription" : "must be between 5 and 2048Gb."
+        },
+        "DBBackupRetention": {
+           "Default": "35",
+           "Description" : "Enter the number of days during which automatic DB snapshots are retained.",
+           "Type": "Number",
+           "MinValue": "0",
+           "MaxValue": "35",
+           "ConstraintDescription" : "must be between 0 and 35 Days."
+        },
+		"WebServerSubnet": {
+			"Type": "AWS::EC2::Subnet::Id",
+			"Description": "Lists existing subnets to choose from"
+		},
+		"DataBaseSubnet": {
+			"Type": "List<AWS::EC2::Subnet::Id>",
+			"Description": "Enter all Data subnets and any other subnets, depending on environments to use for the RDS DBSubnets,The subnets must be in at least 2 availabilty zones"
+		},
+		"InstanceType": {
+			"Description": "WebServer EC2 instance type",
+			"Type": "String",
+			"Default": "m4.large",
+			"AllowedValues": [
+				"t1.micro",
+				"t2.nano",
+				"t2.micro",
+				"t2.small",
+				"t2.medium",
+				"t2.large",
+				"m1.small",
+				"m1.medium",
+				"m1.large",
+				"m1.xlarge",
+				"m2.xlarge",
+				"m2.2xlarge",
+				"m2.4xlarge",
+				"m3.medium",
+				"m3.large",
+				"m3.xlarge",
+				"m3.2xlarge",
+				"m4.large",
+				"m4.xlarge",
+				"m4.2xlarge",
+				"m4.4xlarge",
+				"m4.10xlarge",
+				"c1.medium",
+				"c1.xlarge",
+				"c3.large",
+				"c3.xlarge",
+				"c3.2xlarge",
+				"c3.4xlarge",
+				"c3.8xlarge",
+				"c4.large",
+				"c4.xlarge",
+				"c4.2xlarge",
+				"c4.4xlarge",
+				"c4.8xlarge",
+				"g2.2xlarge",
+				"g2.8xlarge",
+				"r3.large",
+				"r3.xlarge",
+				"r3.2xlarge",
+				"r3.4xlarge",
+				"r3.8xlarge",
+				"i2.xlarge",
+				"i2.2xlarge",
+				"i2.4xlarge",
+				"i2.8xlarge",
+				"d2.xlarge",
+				"d2.2xlarge",
+				"d2.4xlarge",
+				"d2.8xlarge",
+				"hi1.4xlarge",
+				"hs1.8xlarge",
+				"cr1.8xlarge",
+				"cc2.8xlarge",
+				"cg1.4xlarge"
+			],
+			"ConstraintDescription": "must be a valid EC2 instance type."
+		}
+	},
+	"Conditions": {
+		"UseDefaultAMI": {
+			"Fn::Equals": [
+				{
+					"Ref": "cpaEC2AMI"
+				},
+				""
+			]
+		}
+	},
+	"Mappings": {
+		"NatRegionMap": {
+			"us-east-1": {
+				"AMI": "ami-01945499792201081"
+			},
+			"us-west-1": {
+				"AMI": "ami-a98396ec"
+			},
+			"us-west-2": {
+				"AMI": "ami-290f4119"
+			},
+			"eu-west-1": {
+				"AMI": "ami-14913f63"
+			},
+			"eu-central-1": {
+				"AMI": "ami-ae380eb3"
+			},
+			"sa-east-1": {
+				"AMI": "ami-8122969c"
+			},
+			"ap-southeast-1": {
+				"AMI": "ami-ebd47f88"
+			},
+			"ap-southeast-2": {
+				"AMI": "ami-ebd47f88"
+			},
+			"ap-northeast-1": {
+				"AMI": "ami-27d6e626"
+			},
+			"us-gov-west-1": {
+				"AMI": "ami-0949d068"
+			}
+		}
+	},
+	"Resources": {
+		"WebServer": {
+			"Type": "AWS::EC2::Instance",
+			"Properties": {
+			    "AvailabilityZone": {"Ref": "AvailabilityZone"},
+				"InstanceType": {
+					"Ref": "InstanceType"
+				},
+				"SecurityGroupIds": {"Ref": "WebServerSG"},
+				"KeyName": {
+					"Ref": "KeyPairName"
+				},
+				"SourceDestCheck" : "false",
+				"ImageId": {
+					"Fn::If": [
+						"UseDefaultAMI",
+						{
+							"Fn::FindInMap": [
+								"NatRegionMap",
+								{
+									"Ref": "AWS::Region"
+								},
+								"AMI"
+							]
+						},
+						{
+							"Ref": "cpaEC2AMI"
+						}
+					]
+				},
+				"SubnetId": {"Ref": "WebServerSubnet"},
+				"Tags" : [
+		           { "Key" : "Client", "Value" : { "Ref" : "ClientName" } },
+	               { "Key" : "Name", "Value": { "Fn::Join" : [ "-", [ { "Ref" : "RegionLabel" }, { "Ref" : "ClientName" }, { "Ref" : "ServerEnv" }, { "Ref" : "ServerRole" }, { "Ref" : "ServerEnvCount" } ]]}}
+                ]
+			}
+		},
+		"elb": {
+			"Type": "AWS::ElasticLoadBalancing::LoadBalancer",
+			"Properties": {
+				"CrossZone": {"Ref": "ELBZone"},
+				"SecurityGroups" : [ { "Ref" : "ELBSG" }],
+				"Instances": [
+					{
+						"Ref": "WebServer"
+					}
+				],
+				"Tags" : [
+                  { "Key" : "Client", "Value" : { "Ref" : "ClientName" } },
+	              { "Key" : "Name", "Value": { "Fn::Join" : [ "-", [ { "Ref" : "RegionLabel" }, { "Ref" : "ClientName" }, { "Ref" : "ServerRole" }, "elb" ]]}}
+                ],
+				"Listeners": [
+					{
+						"LoadBalancerPort": "80",
+						"InstancePort": "80",
+						"Protocol": "HTTP"
+					}
+				],
+				"HealthCheck": {
+					"Target": "TCP:80",
+					"HealthyThreshold": "3",
+					"UnhealthyThreshold": "5",
+					"Interval": "30",
+					"Timeout": "5"
+				},
+				"ConnectionDrainingPolicy": {
+					"Enabled": "true",
+					"Timeout": "300"
+				},
+				"Tags": [
+					{
+						"Key": "Name",
+						"Value": "ELB"
+					}
+				],
+				"Subnets": [
+					{"Ref": "WebServerSubnet"}
+				]
+			}
+		},
+		"DBSubNetGrp": {
+			"Type": "AWS::RDS::DBSubnetGroup",
+			"Properties": {
+				"DBSubnetGroupDescription": "Subnets for the database",
+				"SubnetIds": {"Ref": "DataBaseSubnet"}
+			}
+		},
+        "rds": {
+          "Type": "AWS::RDS::DBInstance",
+          "Properties": {
+            "Engine" : {"Ref": "DBEngine"},
+            "DBName" : { "Ref": "DBName" },
+            "MultiAZ" : { "Ref": "MultiAZDatabase" },
+            "MasterUsername": { "Ref": "DBUser" },
+            "MasterUserPassword": { "Ref" : "DBPassword" },
+            "DBInstanceClass": { "Ref" : "DBInstanceClass" },
+            "AllocatedStorage": { "Ref" : "DBAllocatedStorage" },
+            "AvailabilityZone": {"Ref": "AvailabilityZone"},
+            "BackupRetentionPeriod" : {"Ref": "DBBackupRetention"},
+		    "DBSubnetGroupName": {"Ref": "DBSubNetGrp"},
+            "CopyTagsToSnapshot" : true,
+		    "PubliclyAccessible": false,
+            "DBInstanceIdentifier" : {"Ref": "DBInstanceIdentifier"},
+		    "DBSnapshotIdentifier" : {"Ref": "DBSnapshotName"},
+		    "LicenseModel" : {"Ref": "DBLicenseModel"},
+		    "Tags" : [
+                      { "Key" : "Client", "Value" : { "Ref" : "ClientName" } },
+	                  { "Key" : "Name", "Value": { "Ref": "DBName" } },
+				      { "Key" : "Environment", "Value": { "Ref": "ServerEnv" } }
+            ],
+            "VPCSecurityGroups": [ { "Ref": "RDSSG" } ]		
+          }
+        }
+    }		
+}
